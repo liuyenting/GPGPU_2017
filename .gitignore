@@ -1,0 +1,5 @@
+# Executables
+gpgpu_lab*
+
+# Object files
+*.o
