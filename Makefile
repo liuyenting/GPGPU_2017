@@ -85,7 +85,7 @@ $(EXE): $(OBJS)
 	@$(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(LIBRARIES)
 
 run: build
-	./$(EXE)
+	@./$(EXE)
 
 clean:
 	rm -f $(EXE) $(HOMEWORK)/*.o
