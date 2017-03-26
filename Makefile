@@ -70,7 +70,7 @@ FILE_LIST	:= $(shell find $(SRC_DIR) -type d)
 # Source files in the designated homework directory
 CPP_SRCS	:= $(wildcard $(addsuffix /*.cpp,$(FILE_LIST)))
 C_SRCS		:= $(wildcard $(addsuffix /*.c,$(FILE_LIST)))
-CU_SRCS		:= $(wildcard $(addsuffix /*.cu,$(SRC_DIR)))
+CU_SRCS		:= $(wildcard $(addsuffix /*.cu,$(FILE_LIST)))
 
 # Target object files
 OBJS	:= $(filter %.o,$(CPP_SRCS:.cpp=.o) $(C_SRCS:.c=.o) $(CU_SRCS:.cu=.o))
