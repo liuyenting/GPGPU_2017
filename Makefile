@@ -1,12 +1,17 @@
 # Target homework folder
-HOMEWORK	= lab0
+SRC_DIR		= lab0 
+
+# Target binary filename
+#EXE		= gpgpu 
 
 # Gencode arguments
 SMS 		?= 30
 
-# Common includes and paths for CUDA
-INCLUDES	= utils
-LIBRARIES	=
+# Common includes and libraries for CUDA
+INC_PATH	= /opt/local/include utils
+LIBRARIES	= m
+
+LIB_PATH	= /opt/local/lib
 
 ################################################################################
 
@@ -31,10 +36,14 @@ endif
 
 ################################################################################
 
+# Prepends parameters
+INC_PARMS	:= $(foreach d, $(INC_PATH), -I$d)
+LIB_PARMS	:= $(foreach d, $(LIB_PATH), -L$d) $(foreach d, $(LIBRARIES), -l$d)
+
 # Default flags
 NVCCFLAGS   := -m $(TARGET_SIZE) -std c++11
-CCFLAGS     := -arch $(HOST_ARCH)
-LDFLAGS     := -rpath $(CUDA_PATH)/lib
+CCFLAGS     := $(INC_PARMS) -arch $(HOST_ARCH)
+LDFLAGS     := $(LIB_PARMS) -rpath $(CUDA_PATH)/lib
 
 # Generate complete flag sets
 ALL_CCFLAGS := $(NVCCFLAGS)
@@ -55,16 +64,19 @@ endif
 
 ################################################################################
 
+# List all the folders in the source directory 
+FILE_LIST	:= $(shell find $(SRC_DIR) -type d) 
+
 # Source files in the designated homework directory
-CPP_SRCS	:= $(wildcard $(HOMEWORK)/*.cpp)
-C_SRCS		:= $(wildcard $(HOMEWORK)/*.c)
-CU_SRCS		:= $(wildcard $(HOMEWORK)/*.cu)
+CPP_SRCS	:= $(wildcard $(addsuffix /*.cpp,$(FILE_LIST)))
+C_SRCS		:= $(wildcard $(addsuffix /*.c,$(FILE_LIST)))
+CU_SRCS		:= $(wildcard $(addsuffix /*.cu,$(SRC_DIR)))
 
 # Target object files
 OBJS	:= $(filter %.o,$(CPP_SRCS:.cpp=.o) $(C_SRCS:.c=.o) $(CU_SRCS:.cu=.o))
 
-# Target binary filename
-EXE			= gpgpu_$(HOMEWORK)
+# Use source directory name as the default
+EXE	?= gpgpu_$(SRC_DIR)
 
 ################################################################################
 
@@ -72,20 +84,23 @@ all: build
 
 build: $(EXE)
 
+$(EXE): $(OBJS)
+	@$(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+
+
 %.o: %.c
 %.o: %.cpp
 	@echo Compiling "$<"...
-	@$(CXX) -I $(INCLUDES) $(ALL_CCFLAGS) -o $@ -c $<
+	@$(CXX) $(INC_PARMS) $(ALL_CCFLAGS) -o $@ -c $<
 
 %.o: %.cu
 	@echo Compiling "$<"...
-	@$(NVCC) -I $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
+	@$(NVCC) $(INC_PARMS) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
-$(EXE): $(OBJS)
-	@$(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(LIBRARIES)
+print-%:
+	@echo '$*=$($*)'
 
 run: build
 	@./$(EXE)
 
 clean:
-	rm -f $(EXE) $(HOMEWORK)/*.o
+	rm -f $(EXE) $(addsuffix /*.o,$(FILE_LIST))
