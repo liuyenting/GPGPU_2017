@@ -42,7 +42,7 @@ struct Ray {
  * Reflection type
  */
 enum Refl_t {
-    DIFF = 0,   // diffuse
+    DIFF = 1,   // diffuse
     SPEC,       // speckle
     REFR        // refract
 };
@@ -90,12 +90,89 @@ struct Sphere : Object {
     }
 };
 
+/*
+ * rendering equation:
+ * outgoing radiance at a point = emitted radiance + reflected radiance
+ *
+ * reflected radiance = sum of (incoming radiance from hemisphere above point)
+ *                      * reflectance function of material
+ *                      * cosine incident angle
+ */
+__device__
+float3 radiance(Ray r, unsigned int ) {
+    float3 color = make_float3(0.0f);   // accumulated color
+    float3 mask = make_float3(1.0f);
+
+    // bounce the ray
+    for (int count = 0; count < 4; count++) {
+        int objId = 0;  // id of the closest object;
+        float dist;     // distance to the closest object;
+
+        // test whether the scence is intersected
+        if (!intersect_scene(r, t, id)) {
+            // return black if missed
+            return make_float3(0.0f);
+        }
+
+        // compute impact location and normal vector
+        const Object &obj =
+        float3 p = ray.orig + r.dir * t;    // impact location
+        float3 n = normaliz(p - obj.pos);   // normal
+        // convert to front facing
+        n = (dot(n, ray.dir) < 0) ? n : n * (-1);
+
+        // add the photons from current object to accumulate the color
+        color += mask * obj.emi;
+
+        /*
+         * generate new diffuse ray
+         *     .orig = impac location
+         *     .dir = random direction above the impact location
+         */
+        float r1 = 2 * PI * getrandom(s1, s2);  // random on unit sphere
+        float r2 = getrandom(s1, s2);
+        float r2s = sqrtf(r2);
+
+        // compute local orthonormal basis uvw at hitpoint to use for calculation random ray direction
+        // first vector = normal at hitpoint, second vector is orthogonal to first, third vector is orthogonal to first two vectors
+        float3 w = nl;
+        float3 u = normalize(cross((fabs(w.x) > .1 ? make_float3(0, 1, 0) : make_float3(1, 0, 0)), w));
+        float3 v = cross(w,u);
+
+        // compute random ray direction on hemisphere using polar coordinates
+        // cosine weighted importance sampling (favours ray directions closer to normal direction)
+        float3 d = normalize(u*cos(r1)*r2s + v*sin(r1)*r2s + w*sqrtf(1 - r2));
+
+        // new ray origin is intersection point of previous ray with scene
+        r.orig = x + nl*0.05f; // offset ray origin slightly to prevent self intersection
+        r.dir = d;
+
+        mask *= obj.col;    // multiply with colour of object
+        mask *= dot(d,nl);  // weigh light contribution using cosine of angle between incident light and normal
+        mask *= 2;          // fudge factor
+    }
+
+    return color;
+}
+
+__global__
+void render(float3 *frame) {
+    unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
+}
+
 int main() {
     const int width = 320, height = 240;
 
     float3 *h_frame = new float3[width*height];
     float3 *d_frame;
     gpuErrChk(cudaMalloc(&d_frame, width*height * sizeof(float3)));
+
+    const dim3 threads(8, 8);
+    // TODO: Use DivUp macro from previous project
+    const dim3 blocks(width/threads.x, height/threads.y);
+
+    render<<<blocks, threads>>>>(d_frame);
 
     gpuErrChk(cudaFree(d_frame));
     delete[] h_frame;
