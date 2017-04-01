@@ -1,18 +1,16 @@
-#include "lab1.h"
-
 // Library
 #include <cuda_runtime.h>
-#include <math_constants.h>
+#include <device_launch_parameters.h>
 
 // Internal
 #include "cutil_math.h"
 
 // System
 #include <iostream>
-#include <sstream>      // stringstream
-#include <fstream>      // ofstream
+#include <vector_types.h>
 
 #define EPS     1e-4f
+#define PI      3.14159265359f
 
 #define gpuErrChk(func) { gpuAssert((func), __FILE__, __LINE__); }
 inline void gpuAssert(
@@ -62,7 +60,7 @@ struct Sphere {
      Refl_t refl;          // reflection type (e.g. diffuse)
 
     __device__
-    float distance(const Ray &ray) const {
+    float intersect_sphere(const Ray &ray) const {
         /*
          * ray equation: p(x, y, z) = ray.orig + t*ray.dir
          * sphere equation: x^2 + y^2 + z^2 = rad^2
@@ -91,20 +89,33 @@ struct Sphere {
 
 __constant__
 Ray c_camera;
+
+// SCENE
+// 9 spheres forming a Cornell box
+// small enough to be in constant GPU memory
+// { float radius, { float3 position }, { float3 emission }, { float3 colour }, refl_type }
 __constant__
-Sphere  c_spheres[8];
+Sphere spheres[] = {
+    { 1e5f, { 1e5f + 1.0f, 40.8f, 81.6f }, { 0.0f, 0.0f, 0.0f }, { 0.75f, 0.25f, 0.25f }, DIFF }, //Left
+    { 1e5f, { -1e5f + 99.0f, 40.8f, 81.6f }, { 0.0f, 0.0f, 0.0f }, { .25f, .25f, .75f }, DIFF }, //Right
+    { 1e5f, { 50.0f, 40.8f, 1e5f }, { 0.0f, 0.0f, 0.0f }, { .75f, .75f, .75f }, DIFF }, //Back
+    { 1e5f, { 50.0f, 40.8f, -1e5f + 600.0f }, { 0.0f, 0.0f, 0.0f }, { 1.00f, 1.00f, 1.00f }, DIFF }, //Frnt
+    { 1e5f, { 50.0f, 1e5f, 81.6f }, { 0.0f, 0.0f, 0.0f }, { .75f, .75f, .75f }, DIFF }, //Botm
+    { 1e5f, { 50.0f, -1e5f + 81.6f, 81.6f }, { 0.0f, 0.0f, 0.0f }, { .75f, .75f, .75f }, DIFF }, //Top
+    { 8.0f, { 73.0f, 8.0f, 78.0f }, { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, DIFF }, // small sphere 2
+    { 600.0f, { 50.0f, 681.6f - .77f, 81.6f }, { 2.0f, 1.8f, 1.6f }, { 0.0f, 0.0f, 0.0f }, DIFF }  // Light
+};
 
 __device__
 inline bool intersect_scene(const Ray &r, float &t, int &id) {
-    float n = sizeof(c_spheres) / sizeof(Sphere), d;
-    t = CUDART_INF_F;  // t is distance to closest intersection, initialise t to a huge number outside scene
+    float n = sizeof(spheres) / sizeof(Sphere), d, inf = t = 1e20;  // t is distance to closest intersection, initialise t to a huge number outside scene
     for (int i = int(n); i--;) { // test all scene objects for intersection
-        if ((d = c_spheres[i].distance(r)) && (d < t)) {  // if newly computed intersection distance d is smaller than current closest intersection distance
-            t = d;  // keep track of distance along ray to closest intersection point
-            id = i; // and closest intersected object
+        if ((d = spheres[i].intersect_sphere(r)) && d<t){  // if newly computed intersection distance d is smaller than current closest intersection distance
+        t = d;  // keep track of distance along ray to closest intersection point
+        id = i; // and closest intersected object
         }
     }
-    return (t < CUDART_INF_F); // returns true if an intersection with the scene occurred, false when no hit
+    return t<inf; // returns true if an intersection with the scene occurred, false when no hit
 }
 
 // random number generator from https://github.com/gz/rust-raytracer
@@ -152,7 +163,7 @@ float3 radiance(Ray ray, unsigned int *s1, unsigned int *s2){
         }
 
         // compute impact location and normal vector
-        const Sphere &obj =  c_spheres[id];
+        const Sphere &obj = spheres[id];
         float3 p = ray.orig + ray.dir * t;  // impact location
         float3 n = normalize(p - obj.pos);  // normal
         // convert to front facing
@@ -166,7 +177,7 @@ float3 radiance(Ray ray, unsigned int *s1, unsigned int *s2){
          *     .orig = impac location
          *     .dir = random direction above the impact location
          */
-        float r1 = 2 * CUDART_PI_F * getrandom(s1, s2); // pick random number on unit circle (radius = 1, circumference = 2*Pi) for azimuth
+        float r1 = 2 * PI * getrandom(s1, s2); // pick random number on unit circle (radius = 1, circumference = 2*Pi) for azimuth
         float r2 = getrandom(s1, s2);  // pick random number for elevation
         float r2s = sqrtf(r2);
 
@@ -206,9 +217,7 @@ void renderKernel(
         return;
     }
 
-    // calculate the index, y direction flipped
-    //unsigned int i = y*width + x;
-    unsigned int i = (height - y - 1) * width + x;
+    unsigned int i = (height - y - 1)*width + x; // index of current pixel (calculated using thread index)
 
     unsigned int s1 = x;  // seeds for random number generator
     unsigned int s2 = y;
@@ -219,175 +228,72 @@ void renderKernel(
     float3 cy = normalize(cross(cx, c_camera.dir)) * .5135; // ray direction offset in y direction (.5135 is field of view angle)
     float3 r; // r is final pixel color
 
-    r = make_float3(0.0f);
+    r = make_float3(0.0f); // reset r to zero for every pixel
 
-    // sampling for each pixel
-    for (int s = 0; s < ntrials; s++) {
+    for (int s = 0; s < ntrials; s++) {  // samples per pixel
+
         // compute primary ray direction
         float3 d = c_camera.dir + cx*((.25 + x) / width - .5) + cy*((.25 + y) / height - .5);
 
         // create primary ray, add incoming radiance to pixelcolor
         r = r + radiance(Ray(c_camera.orig + d * 40, normalize(d)), &s1, &s2)*(1. / ntrials);
-                   // Camera rays are pushed ^^^^^^ forward to start in interior
+              // Camera rays are pushed ^^^^^^ forward to start in interior
     }
 
     // write rgb value of pixel to image buffer on the GPU, clamp value to [0.0f, 1.0f] range
     frame[i] = clamp(r, 0.0f, 1.0f);
 }
 
-__device__
-uint8_t flt2int(float x) {
-	return uint8_t(pow(clamp(x, 0.0f, 1.0f), 1/2.2f) * 255 + .5);
-}
-
-__global__
-void convertKernel(
-    uint8_t *out,
-    const float3 *in,
-    const int width,
-    const int height
-) {
-	const unsigned int ix = blockIdx.x*blockDim.x + threadIdx.x;
-	const unsigned int iy = blockIdx.y*blockDim.y + threadIdx.y;
-
-	if ((ix >= width) || (iy >= height)) {
-		return;
-	}
-
-	unsigned int i = (height - iy - 1) * width + ix;
-
-	uint8_t r = flt2int(in[i].x);
-	uint8_t g = flt2int(in[i].y);
-	uint8_t b = flt2int(in[i].z);
-
-	// calculate y plane
-	float y = 0.299f * r + 0.587f * g + 0.114f * b;
-	out[i] = y;
-
-	// subsample u/v plane
-	if ((ix%2 == 0) && (iy%2 == 0)) {
-		float3 c0 = in[i];
-		float3 c1 = in[(height - iy - 1) * width + (ix+1)];
-		float3 c2 = in[(height - (iy+1) - 1) * width + ix];
-		float3 c3 = in[(height - (iy+1) - 1) * width + (ix+1)];
-
-		c0 += c1;
-		c0 += c2;
-		c0 += c3;
-
-		c0 /= 4;
-
-		r = flt2int(c0.x);
-		g = flt2int(c0.y);
-		b = flt2int(c0.z);
-
-		float u = -0.169f * r - 0.331f * g + 0.500f * b + 128;
-		float v = 0.500f * r - 0.419f * g - 0.081f * b + 128;
-
-		const unsigned int offset = width * height;
-		out[offset + iy/2 * width/2 + ix/2] = u;
-		out[offset + (offset/4) + iy/2 * width/2 + ix/2] = v;
-	}
-}
-
 /*
- * using 9 spheres to form a cornell box
- *
- * {
- *     float radius,
- *     { float3 position },
- *     { float3 emission },
- *     { float3 color },
- *     Refl_t refl
- * }
+ * 1) convert RGB float from [0, 1] to [0, 255]
+ * 2) perform gamma correction
  */
-Sphere h_spheres[] = {
-    { 1e5f, { 1e5f + 1.0f, 40.8f, 81.6f }, { 0.0f, 0.0f, 0.0f }, { 0.75f, 0.25f, 0.25f }, DIFF }, //Left
-    { 1e5f, { -1e5f + 99.0f, 40.8f, 81.6f }, { 0.0f, 0.0f, 0.0f }, { .25f, .25f, .75f }, DIFF }, //Right
-    { 1e5f, { 50.0f, 40.8f, 1e5f }, { 0.0f, 0.0f, 0.0f }, { .75f, .75f, .75f }, DIFF }, //Back
-    { 1e5f, { 50.0f, 40.8f, -1e5f + 600.0f }, { 0.0f, 0.0f, 0.0f }, { 1.00f, 1.00f, 1.00f }, DIFF }, //Frnt
-    { 1e5f, { 50.0f, 1e5f, 81.6f }, { 0.0f, 0.0f, 0.0f }, { .75f, .75f, .75f }, DIFF }, //Botm
-    { 1e5f, { 50.0f, -1e5f + 81.6f, 81.6f }, { 0.0f, 0.0f, 0.0f }, { .75f, .75f, .75f }, DIFF }, //Top
-    { 8.0f, { 50.0f, 40.0f, 78.0f }, { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, DIFF }, // small sphere 2
-    { 600.0f, { 50.0f, 681.6f - .50f, 81.6f }, { 2.0f, 1.8f, 1.6f }, { 0.0f, 0.0f, 0.0f }, DIFF }  // Light
-};
+inline int toInt(float x) {
+    return int(pow(clamp(x, 0.0f, 1.0f), 1/2.2f) * 255 + .5);
+}
 
-void updatePhysics(const int fid, const int priId=6) {
-    float theta = 2*CUDART_PI_F * fid/48;
-    h_spheres[priId].pos = make_float3(
-        16.0f * cosf(theta) + 50.0f,
-        16.0f * sinf(theta) + 40.0f,
-        78.0f
+int main(){
+    const int width = 512, height = 384;
+    const int ntrials = 2048;
+
+    Ray camera(
+        make_float3(50, 52, 295.6),
+        normalize(make_float3(0, -0.042612, -1))
     );
+
+    const int nelem = width * height;
+    const size_t nbytes = nelem * sizeof(float3);
+
+    float3* h_frame = new float3[nelem];
+    float3* d_frame;
+    gpuErrChk(cudaMalloc(&d_frame, nbytes));
+
+    // copy camera position to constant memory
+    gpuErrChk(cudaMemcpyToSymbol(c_camera, &camera, sizeof(Ray)));
+
+    std::cout << "CUDA initialized, start rendering..." << std::endl;
+
+    dim3 threads(16, 16);
+    dim3 blocks(DIVUP(width, threads.x), DIVUP(height, threads.y));
+    renderKernel<<<blocks, threads>>>(d_frame, width, height, ntrials);
+
+    // copy the result back
+    gpuErrChk(cudaMemcpy(h_frame, d_frame, nbytes, cudaMemcpyDeviceToHost));
+    gpuErrChk(cudaFree(d_frame));
+
+    std::cout << "Done!" << std::endl;
+
+    // save image to file
+    FILE *f = fopen("smallptcuda.ppm", "w");
+    fprintf(f, "P3\n%d %d\n%d\n", width, height, 255);
+    for (int i = 0; i < nelem; i++) { // loop over pixels, write RGB values
+        fprintf(f, "%d %d %d ",
+                    toInt(h_frame[i].x), toInt(h_frame[i].y), toInt(h_frame[i].z));
+    }
+
+    std::cout << "Saved image to 'smallptcuda.ppm'" << std::endl;
+
+    delete[] h_frame;
+
+    return 0;
 }
-
-struct Lab1VideoGenerator::Impl {
-	const int width = 640, height = 480;
-	int nelem;
-	size_t nbytes;
-
-	const int ntrials = 768;
-
-	const int nframe = 48;
-	int iframe = 0;
-
-	// frame in rgb
-	float3 *h_frame;
-	float3 *d_frame;
-
-	Impl() {
-		nelem = width * height;
-		nbytes = nelem * sizeof(float3);
-	}
-};
-
-Lab1VideoGenerator::Lab1VideoGenerator()
-	: impl(new Impl) {
-	// generate frame storage
-	impl->h_frame = new float3[impl->nelem];
-	gpuErrChk(cudaMalloc(&impl->d_frame, impl->nbytes));
-
-	// copy camera position to constant memory
-	Ray camera(
-		make_float3(50, 52, 295.6),
-		normalize(make_float3(0, -0.042612, -1))
-	);
-	gpuErrChk(cudaMemcpyToSymbol(c_camera, &camera, sizeof(Ray)));
-}
-
-Lab1VideoGenerator::~Lab1VideoGenerator() {
-	gpuErrChk(cudaFree(impl->d_frame));
-    delete[] impl->h_frame;
-}
-
-void Lab1VideoGenerator::Generate(uint8_t *yuv) {
-	dim3 threads(16, 16);
-    dim3 blocks(
-		DIVUP(impl->width, threads.x),
-		DIVUP(impl->height, threads.y)
-	);
-
-	// update the position
-	updatePhysics(impl->iframe);
-	gpuErrChk(cudaMemcpyToSymbol(c_spheres, &h_spheres, sizeof(h_spheres)));
-
-	// render the view
-	renderKernel<<<blocks, threads>>>(impl->d_frame, impl->width, impl->height, impl->ntrials);
-
-	// convert from rgb to yuv444
-	convertKernel<<<blocks, threads>>>(yuv, impl->d_frame, impl->width, impl->height);
-
-	// increase frame number
-	std::cout << impl->iframe << std::endl << std::flush;
-	++(impl->iframe);
-}
-
-void Lab1VideoGenerator::get_info(Lab1VideoInfo &info) {
-	info.w = impl->width;
-	info.h = impl->height;
-	info.n_frame = impl->nframe;
-
-	// fps = 24/1 = 24
-	info.fps_n = 24;
-	info.fps_d = 1;
-};
