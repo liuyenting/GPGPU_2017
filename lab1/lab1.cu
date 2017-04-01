@@ -313,7 +313,7 @@ Sphere h_spheres[] = {
 };
 
 void updatePhysics(const int fid, const int priId=6) {
-    float theta = 2*CUDART_PI_F * fid/48;
+    float theta = 2*CUDART_PI_F * fid/60;
     h_spheres[priId].pos = make_float3(
         16.0f * cosf(theta) + 50.0f,
         16.0f * sinf(theta) + 40.0f,
@@ -326,9 +326,9 @@ struct Lab1VideoGenerator::Impl {
 	int nelem;
 	size_t nbytes;
 
-	const int ntrials = 768;
+	const int ntrials = 1280;
 
-	const int nframe = 48;
+	const int nframe = 120;
 	int iframe = 0;
 
 	// frame in rgb

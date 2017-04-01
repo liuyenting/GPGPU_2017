@@ -284,7 +284,7 @@ void updatePhysics(const float t_step, const int priId) {
 int main(){
     const int width = 640, height = 480;
     const int fps = 24, nframes = 1;
-    const int ntrials = 768;
+    const int ntrials = 2048;
 
     const float t_step = 1.0f; //1.0f/fps;
 

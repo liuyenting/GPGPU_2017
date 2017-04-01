@@ -1,5 +1,5 @@
 # Target homework folder
-SRC_DIR		= lab1_indep
+SRC_DIR		= lab1
 
 # Target binary filename
 #EXE		= gpgpu
