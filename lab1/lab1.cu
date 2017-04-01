@@ -326,7 +326,7 @@ struct Lab1VideoGenerator::Impl {
 	int nelem;
 	size_t nbytes;
 
-	const int ntrials = 2048;
+	const int ntrials = 3072;
 
 	const int nframe = 120;
 	int iframe = 0;
