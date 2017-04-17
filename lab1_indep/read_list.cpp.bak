@@ -1,0 +1,88 @@
+#include <iostream>
+#include <fstream>
+#include <sstream>
+
+void read_plane(std::ifstream &infile) {
+    std::cout << "\tnot implmement" << std::endl;
+}
+
+void read_sphere(std::ifstream &infile) {
+    std::string line;
+    std::istringstream ss;
+
+    std::getline(infile, line);
+    ss.str(line);
+    ss.clear();
+
+    float rad;
+    ss >> rad;
+    std::cout << "\tradius = " << rad << std::endl;
+
+    std::getline(infile, line);
+    ss.str(line);
+    ss.clear();
+
+    float x, y, z;
+    ss >> x >> y >> z;
+    std::cout << "\t(x, y, z) = (" << x << ", " << y << ", " << z << ")" << std::endl;
+
+    std::getline(infile, line);
+    ss.str(line);
+    ss.clear();
+
+    float ex, ey, ez;
+    ss >> ex >> ey >> ez;
+    std::cout << "\temi (x, y, z) = (" << ex << ", " << ey << ", " << ez << ")" << std::endl;
+
+    std::getline(infile, line);
+    ss.str(line);
+    ss.clear();
+
+    float r, g, b;
+    ss >> r >> g >> b;
+    std::cout << "\t(r, g, b) = (" << r << ", " << g << ", " << b << ")" << std::endl;
+
+    std::getline(infile, line);
+    ss.str(line);
+    ss.clear();
+
+    int refl;
+    ss >> refl;
+    std::cout << "\trefl_t = " << refl << std::endl;
+}
+
+int main(void) {
+    std::ifstream infile;
+
+    infile.open("list");
+    int nobjs;
+    infile >> nobjs;
+
+    std::cout << nobjs << " object(s) in the list" << std::endl;
+
+    std::string line;
+    for (int i = 0; i < nobjs; i++) {
+        // search for object block
+        for (; std::getline(infile, line); ) {
+            // ignore blank line and comments
+            if (!(line.length() == 0) && !(line.find("#") == 0)) {
+                break;
+            }
+        }
+
+        std::cout << (i+1) << ") ";
+
+        if (line == "SPHERE") {
+            std::cout << "sphere" << std::endl;
+            read_sphere(infile);
+        } else if (line == "PLANE") {
+            std::cout << "plane" << std::endl;
+            read_plane(infile);
+        } else {
+            std::cout << "UNKNOWN, error" << std::endl;
+            return 1;
+        }
+    }
+
+    return 0;
+}

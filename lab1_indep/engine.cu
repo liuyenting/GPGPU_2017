@@ -1,5 +1,3 @@
-#include "lab1.h"
-
 // Library
 #include <cuda_runtime.h>
 #include <math_constants.h>
@@ -235,59 +233,21 @@ void renderKernel(
     frame[i] = clamp(r, 0.0f, 1.0f);
 }
 
-__device__
-uint8_t flt2int(float x) {
-	return uint8_t(pow(clamp(x, 0.0f, 1.0f), 1/2.2f) * 255 + .5);
+/*
+ * 1) convert RGB float from [0, 1] to [0, 255]
+ * 2) perform gamma correction
+ */
+inline int toInt(float x) {
+    return int(pow(clamp(x, 0.0f, 1.0f), 1/2.2f) * 255 + .5);
 }
 
 __global__
 void convertKernel(
-    uint8_t *out,
+    float3 *out,
     const float3 *in,
     const int width,
     const int height
 ) {
-	const unsigned int ix = blockIdx.x*blockDim.x + threadIdx.x;
-	const unsigned int iy = blockIdx.y*blockDim.y + threadIdx.y;
-
-	if ((ix >= width) || (iy >= height)) {
-		return;
-	}
-
-	unsigned int i = (height - iy - 1) * width + ix;
-
-	uint8_t r = flt2int(in[i].x);
-	uint8_t g = flt2int(in[i].y);
-	uint8_t b = flt2int(in[i].z);
-
-	// calculate y plane
-	float y = 0.299f * r + 0.587f * g + 0.114f * b;
-	out[i] = y;
-
-	// subsample u/v plane
-	if ((ix%2 == 0) && (iy%2 == 0)) {
-		float3 c0 = in[i];
-		float3 c1 = in[(height - iy - 1) * width + (ix+1)];
-		float3 c2 = in[(height - (iy+1) - 1) * width + ix];
-		float3 c3 = in[(height - (iy+1) - 1) * width + (ix+1)];
-
-		c0 += c1;
-		c0 += c2;
-		c0 += c3;
-
-		c0 /= 4;
-
-		r = flt2int(c0.x);
-		g = flt2int(c0.y);
-		b = flt2int(c0.z);
-
-		float u = -0.169f * r - 0.331f * g + 0.500f * b + 128;
-		float v = 0.500f * r - 0.419f * g - 0.081f * b + 128;
-
-		const unsigned int offset = width * height;
-		out[offset + iy/2 * width/2 + ix/2] = u;
-		out[offset + (offset/4) + iy/2 * width/2 + ix/2] = v;
-	}
 }
 
 /*
@@ -309,11 +269,11 @@ Sphere h_spheres[] = {
     { 1e5f, { 50.0f, 1e5f, 81.6f }, { 0.0f, 0.0f, 0.0f }, { .75f, .75f, .75f }, DIFF }, //Botm
     { 1e5f, { 50.0f, -1e5f + 81.6f, 81.6f }, { 0.0f, 0.0f, 0.0f }, { .75f, .75f, .75f }, DIFF }, //Top
     { 8.0f, { 50.0f, 40.0f, 78.0f }, { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, DIFF }, // small sphere 2
-    { 600.0f, { 50.0f, 681.6f - .50f, 81.6f }, { 2.0f, 1.8f, 1.6f }, { 0.0f, 0.0f, 0.0f }, DIFF }  // Light
+    { 600.0f, { 50.0f, 681.6f - .25f, 81.6f }, { 2.0f, 1.8f, 1.6f }, { 0.0f, 0.0f, 0.0f }, DIFF }  // Light
 };
 
-void updatePhysics(const int fid, const int priId=6) {
-    float theta = 2*CUDART_PI_F * fid/60;
+void updatePhysics(const float t_step, const int priId) {
+    float theta = 2*CUDART_PI_F * t_step/5;
     h_spheres[priId].pos = make_float3(
         16.0f * cosf(theta) + 50.0f,
         16.0f * sinf(theta) + 40.0f,
@@ -321,73 +281,77 @@ void updatePhysics(const int fid, const int priId=6) {
     );
 }
 
-struct Lab1VideoGenerator::Impl {
-	const int width = 640, height = 480;
-	int nelem;
-	size_t nbytes;
+int main(){
+    const int width = 640, height = 480;
+    const int fps = 24, nframes = 1;
+    const int ntrials = 2048;
 
-	const int ntrials = 3072;
+    const float t_step = 1.0f; //1.0f/fps;
 
-	const int nframe = 120;
-	int iframe = 0;
+    Ray camera(
+        make_float3(50, 52, 295.6),
+        normalize(make_float3(0, -0.042612, -1))
+    );
 
-	// frame in rgb
-	float3 *h_frame;
-	float3 *d_frame;
+    const int nelem = width * height;
+    const size_t nbytes = nelem * sizeof(float3);
 
-	Impl() {
-		nelem = width * height;
-		nbytes = nelem * sizeof(float3);
-	}
-};
+    float3* h_frame = new float3[nelem];
+    float3* d_frame;
+    gpuErrChk(cudaMalloc(&d_frame, nbytes));
 
-Lab1VideoGenerator::Lab1VideoGenerator()
-	: impl(new Impl) {
-	// generate frame storage
-	impl->h_frame = new float3[impl->nelem];
-	gpuErrChk(cudaMalloc(&impl->d_frame, impl->nbytes));
+    // copy camera position to constant memory
+    gpuErrChk(cudaMemcpyToSymbol(c_camera, &camera, sizeof(Ray)));
 
-	// copy camera position to constant memory
-	Ray camera(
-		make_float3(50, 52, 295.6),
-		normalize(make_float3(0, -0.042612, -1))
-	);
-	gpuErrChk(cudaMemcpyToSymbol(c_camera, &camera, sizeof(Ray)));
+    std::cout << "CUDA initialized" << std::endl << std::flush;
+
+    dim3 threads(16, 16);
+    dim3 blocks(DIVUP(width, threads.x), DIVUP(height, threads.y));
+    std::stringstream ss;
+    std::ofstream outfile;
+    for (int iframe = 1; iframe <= nframes; iframe++) {
+        std::cout << "Frame " << iframe;
+        std::cout << ", t=" << (iframe * t_step) << 's' << std::endl;
+
+        std::cout << "\r\tUPDATING...     " << std::flush;
+
+        // update the position
+        updatePhysics(t_step * iframe, 6);
+        gpuErrChk(cudaMemcpyToSymbol(c_spheres, &h_spheres, sizeof(h_spheres)));
+
+        std::cout << "\r\tRUNNING...     " << std::flush;
+
+        renderKernel<<<blocks, threads>>>(d_frame, width, height, ntrials);
+
+        // copy the result back
+        gpuErrChk(cudaMemcpy(h_frame, d_frame, nbytes, cudaMemcpyDeviceToHost));
+
+        std::cout << "\r\tSAVING...     " << std::flush;
+
+        ss.str(std::string());
+        ss.clear();
+        // build new filename
+        ss << "frame_" << iframe << ".ppm";
+
+        outfile.open(ss.str());
+
+        // write PPM definition
+        outfile << "P3" << std::endl;
+        outfile << width << ' ' << height << " 255" << std::endl;
+        // write image
+        for (int i = 0; i < nelem; i++) {
+            outfile << toInt(h_frame[i].x) << ' ';
+            outfile << toInt(h_frame[i].y) << ' ';
+            outfile << toInt(h_frame[i].z) << ' ';
+        }
+
+        outfile.close();
+
+        std::cout << "\r\tDone!     " << std::endl;
+    }
+
+    gpuErrChk(cudaFree(d_frame));
+    delete[] h_frame;
+
+    return 0;
 }
-
-Lab1VideoGenerator::~Lab1VideoGenerator() {
-	gpuErrChk(cudaFree(impl->d_frame));
-    delete[] impl->h_frame;
-}
-
-void Lab1VideoGenerator::Generate(uint8_t *yuv) {
-	dim3 threads(16, 16);
-    dim3 blocks(
-		DIVUP(impl->width, threads.x),
-		DIVUP(impl->height, threads.y)
-	);
-
-	// update the position
-	updatePhysics(impl->iframe);
-	gpuErrChk(cudaMemcpyToSymbol(c_spheres, &h_spheres, sizeof(h_spheres)));
-
-	// render the view
-	renderKernel<<<blocks, threads>>>(impl->d_frame, impl->width, impl->height, impl->ntrials);
-
-	// convert from rgb to yuv444
-	convertKernel<<<blocks, threads>>>(yuv, impl->d_frame, impl->width, impl->height);
-
-	// increase frame number
-	std::cout << impl->iframe << std::endl << std::flush;
-	++(impl->iframe);
-}
-
-void Lab1VideoGenerator::get_info(Lab1VideoInfo &info) {
-	info.w = impl->width;
-	info.h = impl->height;
-	info.n_frame = impl->nframe;
-
-	// fps = 24/1 = 24
-	info.fps_n = 24;
-	info.fps_d = 1;
-};

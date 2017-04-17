@@ -3,3 +3,6 @@ gpgpu_lab*
 
 # Object files
 *.o
+
+# macOS finder residuals
+.DS_Store

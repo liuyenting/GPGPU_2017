@@ -1,8 +1,8 @@
 # Target homework folder
-SRC_DIR		= lab0 
+SRC_DIR		= lab1
 
 # Target binary filename
-#EXE		= gpgpu 
+#EXE		= gpgpu
 
 # Gencode arguments
 SMS 		?= 30
@@ -64,8 +64,8 @@ endif
 
 ################################################################################
 
-# List all the folders in the source directory 
-FILE_LIST	:= $(shell find $(SRC_DIR) -type d) 
+# List all the folders in the source directory
+FILE_LIST	:= $(shell find $(SRC_DIR) -type d)
 
 # Source files in the designated homework directory
 CPP_SRCS	:= $(wildcard $(addsuffix /*.cpp,$(FILE_LIST)))
