@@ -22,4 +22,4 @@ add_compile_options (-std=c++14)
 include_directories ("${PROJECT_SOURCE_DIR}/utils")
 
 # build demo program
-add_subdirectory ("lab0" "lab1" "lab2")
+add_subdirectory ("lab2")
