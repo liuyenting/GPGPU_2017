@@ -83,6 +83,14 @@ void TestRoutine(
 	const int *yours = yours_sync.get_cpu_ro();
 	int n_match = mismatch(golden, golden+n, yours).first - golden;
 
+
+	fprintf(stderr, "calc\n");
+	for (int i = 0; i < n; i++) {
+		fprintf(stderr, "%d\t", yours[i]);
+	}
+	fprintf(stderr, "\n");
+
+
 	printf_timer(timer_count_position);
 	if (n_match != n) {
 		printf("Part %d WA\n", part);
@@ -95,9 +103,22 @@ int main(int argc, char **argv)
 {
 	// Initialize random text
 	default_random_engine engine(12345);
-	auto text_pos_head = GenerateTestCase(engine, 40000000); // 40 MB data
+	//auto text_pos_head = GenerateTestCase(engine, 40000000); // 40 MB data
+	auto text_pos_head = GenerateTestCase(engine, 10);
 	vector<char> &text = get<0>(text_pos_head);
 	vector<int> &pos = get<1>(text_pos_head);
+
+
+	fprintf(stderr, "text\n");
+	for (int i = 0; i < text.size(); i++) {
+		fprintf(stderr, "%x\t", text[i]);
+	}
+	fprintf(stderr, "\npos\n");
+	for (int i = 0; i < text.size(); i++) {
+		fprintf(stderr, "%d\t", pos[i]);
+	}
+	fprintf(stderr, "\n");
+
 
 	// Prepare buffers
 	int n = text.size();

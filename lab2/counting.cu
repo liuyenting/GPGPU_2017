@@ -59,7 +59,102 @@ void scan(
     int *output,
     const int n
 ) {
+    extern __shared__ int temp[];
 
+    int tid = threadIdx.x;
+    int offset = 1;
+
+    // pre-load data into the shared memory
+    temp[2*tid] = input[2*tid];
+    temp[2*tid+1] = input[2*tid+1];
+
+    __syncthreads();
+    if (tid == 0) {
+        printf(" -- loaded --\n");
+        for (int i = 0; i < n; i++) {
+            printf("%d\t", temp[i]);
+        }
+        printf("\n");
+    }
+
+    // up-sweep
+    if (tid == 0) {
+        printf(" -- up-sweep --\n");
+    }
+    for (int d = n>>1; d > 0; d >>= 1) {
+        __syncthreads();
+
+        if (tid < d) {
+            int ai = offset*(2*tid+1)-1;
+            int bi = offset*(2*tid+2)-1;
+
+            temp[bi] += temp[ai];
+        }
+        offset *= 2;
+
+        __syncthreads();
+        if (tid == 0) {
+            for (int i = 0; i < n; i++) {
+                printf("%d\t", temp[i]);
+            }
+            printf("\n");
+        }
+    }
+
+    // remove the root element
+    if (tid == 0) {
+        temp[n-1] = 0;
+    }
+
+    __syncthreads();
+    if (tid == 0) {
+        printf(" -- root removed --\n");
+        for (int i = 0; i < n; i++) {
+            printf("%d\t", temp[i]);
+        }
+        printf("\n");
+    }
+
+    // down-sweep
+    if (tid == 0) {
+        printf(" -- down-sweep --\n");
+    }
+    for (int d = 1;  d < n; d *= 2) {
+        offset >>= 1;
+        __syncthreads();
+
+        if (tid < d) {
+            int ai = offset*(2*tid+1)-1;
+            int bi = offset*(2*tid+2)-1;
+
+            int t = temp[ai];
+            temp[ai] = temp[bi];
+            temp[bi] += t;
+        }
+
+        __syncthreads();
+        if (tid == 0) {
+            for (int i = 0; i < n; i++) {
+                printf("%d\t", temp[i]);
+            }
+            printf("\n");
+        }
+    }
+
+    __syncthreads();
+
+    // save the result
+    output[2*tid] = temp[2*tid];
+    output[2*tid+1] = temp[2*tid+1];
+
+    __syncthreads();
+    if (tid == 0) {
+        printf(" -- output --\n");
+        for (int i = 0; i < n; i++) {
+            printf("%d\t", output[i]);
+        }
+        printf("\n");
+    }
 }
 
 }
@@ -70,4 +165,10 @@ void CountPosition2(const char *text, int *pos, int text_size)
     cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, 0);
 
     lab2::transform<<<32*numSMs, 256>>>(text, pos, text_size);
+
+    int data[] = { 1, 1, 1, 0, 0, 1, 1, 0 };
+    int *d_data;
+    cudaMalloc(&d_data, 8 * sizeof(int));
+    cudaMemcpy(d_data, data, 8 * sizeof(int), cudaMemcpyHostToDevice);
+    lab2::scan<<<1, 8, 8*sizeof(int)>>>(d_data, d_data, 8);
 }
