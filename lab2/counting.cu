@@ -56,6 +56,7 @@ void transform(
 __global__
 void scan(
     const int *input,
+    int *flag,
     int *output,
     const int n
 ) {
@@ -88,14 +89,17 @@ void scan(
             int ai = offset*(2*tid+1)-1;
             int bi = offset*(2*tid+2)-1;
 
-            temp[bi] += temp[ai];
+            if (flag[bi] == 0) {
+                temp[bi] += temp[ai];
+            }
+            flag[bi] |= flag[ai];
         }
         offset *= 2;
 
         __syncthreads();
         if (tid == 0) {
             for (int i = 0; i < n; i++) {
-                printf("%d\t", temp[i]);
+                printf("(%d,%d)\t", flag[i], temp[i]);
             }
             printf("\n");
         }
@@ -104,13 +108,14 @@ void scan(
     // remove the root element
     if (tid == 0) {
         temp[n-1] = 0;
+        flag[n-1] = 0;
     }
 
     __syncthreads();
     if (tid == 0) {
         printf(" -- root removed --\n");
         for (int i = 0; i < n; i++) {
-            printf("%d\t", temp[i]);
+            printf("(%d,%d)\t", flag[i], temp[i]);
         }
         printf("\n");
     }
@@ -129,13 +134,20 @@ void scan(
 
             int t = temp[ai];
             temp[ai] = temp[bi];
-            temp[bi] += t;
+            if (flag[ai+1] == 1) {
+                temp[bi] = 0;
+            } else if (flag[ai] == 1) {
+                temp[bi] = t;
+            } else {
+                temp[bi] += t;
+            }
+            flag[ai] = 0;
         }
 
         __syncthreads();
         if (tid == 0) {
             for (int i = 0; i < n; i++) {
-                printf("%d\t", temp[i]);
+                printf("(%d,%d)\t", flag[i], temp[i]);
             }
             printf("\n");
         }
@@ -166,9 +178,12 @@ void CountPosition2(const char *text, int *pos, int text_size)
 
     lab2::transform<<<32*numSMs, 256>>>(text, pos, text_size);
 
-    int data[] = { 1, 1, 1, 0, 0, 1, 1, 0 };
-    int *d_data;
+    int data[] = { 4, 2, 1, 3, 0, 2, 1, 5 };
+    int flag[] = { 1, 0, 0, 1, 0, 0, 1, 0 };
+    int *d_data, *d_flag;
     cudaMalloc(&d_data, 8 * sizeof(int));
+    cudaMalloc(&d_flag, 8 * sizeof(int));
     cudaMemcpy(d_data, data, 8 * sizeof(int), cudaMemcpyHostToDevice);
-    lab2::scan<<<1, 8, 8*sizeof(int)>>>(d_data, d_data, 8);
+    cudaMemcpy(d_flag, flag, 8 * sizeof(int), cudaMemcpyHostToDevice);
+    lab2::scan<<<1, 8, 8*sizeof(int)>>>(d_data, d_flag, d_data, 8);
 }
