@@ -1,5 +1,6 @@
 #include "lab3.h"
 #include <cstdio>
+#include <cassert>
 
 __device__ __host__ int CeilDiv(int a, int b) { return (a-1)/b + 1; }
 __device__ __host__ int CeilAlign(int a, int b) { return CeilDiv(a, b) * b; }
@@ -45,15 +46,6 @@ __global__ void CalculateFixed(
 	}
 
 	const int yb = oy+yt, xb = ox+xt;
-	const int clb = wb*yb+xb;
-
-	// 1px spacing, using background values
-	if (yt < 1 or yt >= ht-1 or xt < 1 or xt >= wt-1) {
-		fixed[clt*3+0] = background[clb*3+0];
-		fixed[clt*3+1] = background[clb*3+1];
-		fixed[clt*3+2] = background[clb*3+2];
-		return;
-	}
 
 	// calculate target N, S, W, E linear index
 	const int nlt = wt*(yt+1)+xt;
@@ -63,42 +55,71 @@ __global__ void CalculateFixed(
 	// calculate background N, S, W, E linear index
 	const int nlb = wb*(yb+1)+xb;
 	const int slb = wb*(yb-1)+xb;
-	const int wlb = wb*yb+(xb+1);
-	const int elb = wb*yb+(xb-1);
+	const int wlb = wb*yb+(xb-1);
+	const int elb = wb*yb+(xb+1);
 
+	int npx = 4;
 	// surrounding pixel sum
-	const float surPx0 = target[nlt*3+0] + target[slt*3+0] + target[wlt*3+0] + target[elt*3+0];
-	const float surPx1 = target[nlt*3+1] + target[slt*3+1] + target[wlt*3+1] + target[elt*3+1];
-	const float surPx2 = target[nlt*3+2] + target[slt*3+2] + target[wlt*3+2] + target[elt*3+2];
-
+	float surPx0 = 0.0f, surPx1 = 0.0f, surPx2 = 0.0f;
 	// constant neighbor pixel
 	float conPx0 = 0.0f, conPx1 = 0.0f, conPx2 = 0.0f;
-	// accumulate the background pixels
-	if (mask[nlt] <= 127.0f) {
-		conPx0 += background[nlb*3+0];
-		conPx1 += background[nlb*3+1];
-		conPx2 += background[nlb*3+2];
+	if (yt < ht-1) {
+		surPx0 += target[nlt*3+0];
+		surPx1 += target[nlt*3+1];
+		surPx2 += target[nlt*3+2];
+
+		if (mask[nlt] <= 127.0f) {
+			conPx0 += background[nlb*3+0];
+			conPx1 += background[nlb*3+1];
+			conPx2 += background[nlb*3+2];
+		}
+	} else {
+		npx--;
 	}
-	if (mask[slt] <= 127.0f) {
-		conPx0 += background[slb*3+0];
-		conPx1 += background[slb*3+1];
-		conPx2 += background[slb*3+2];
+	if (yt > 1) {
+		surPx0 += target[slt*3+0];
+		surPx1 += target[slt*3+1];
+		surPx2 += target[slt*3+2];
+
+		if (mask[slt] <= 127.0f) {
+			conPx0 += background[slb*3+0];
+			conPx1 += background[slb*3+1];
+			conPx2 += background[slb*3+2];
+		}
+	} else {
+		npx--;
 	}
-	if (mask[wlt] <= 127.0f) {
-		conPx0 += background[wlb*3+0];
-		conPx1 += background[wlb*3+1];
-		conPx2 += background[wlb*3+2];
+	if (xt > 1) {
+		surPx0 += target[wlt*3+0];
+		surPx1 += target[wlt*3+1];
+		surPx2 += target[wlt*3+2];
+
+		if (mask[wlt] <= 127.0f) {
+			conPx0 += background[wlb*3+0];
+			conPx1 += background[wlb*3+1];
+			conPx2 += background[wlb*3+2];
+		}
+	} else {
+		npx--;
 	}
-	if (mask[elt] <= 127.0f) {
-		conPx0 += background[elb*3+0];
-		conPx1 += background[elb*3+1];
-		conPx2 += background[elb*3+2];
+	if (xt < wt-1) {
+		surPx0 += target[elt*3+0];
+		surPx1 += target[elt*3+1];
+		surPx2 += target[elt*3+2];
+
+		if (mask[elt] <= 127.0f) {
+			conPx0 += background[elb*3+0];
+			conPx1 += background[elb*3+1];
+			conPx2 += background[elb*3+2];
+		}
+	} else {
+		npx--;
 	}
 
 	// fill the constant value
-	fixed[clt*3+0] = (4*target[clt*3+0] - surPx0 + conPx0)/4;
-	fixed[clt*3+1] = (4*target[clt*3+1] - surPx1 + conPx1)/4;
-	fixed[clt*3+2] = (4*target[clt*3+2] - surPx2 + conPx2)/4;
+	fixed[clt*3+0] = (npx*target[clt*3+0] - surPx0 + conPx0)/npx;
+	fixed[clt*3+1] = (npx*target[clt*3+1] - surPx1 + conPx1)/npx;
+	fixed[clt*3+2] = (npx*target[clt*3+2] - surPx2 + conPx2)/npx;
 }
 
 __global__ void PoissonImageCloningIteration(
@@ -117,48 +138,59 @@ __global__ void PoissonImageCloningIteration(
 		return;
 	}
 
-	// 1px spacing, using background values
-	if (yt < 1 or yt >= ht-1 or xt < 1 or xt >= wt-1) {
-		out[clt*3+0] = in[clt*3+0];
-		out[clt*3+1] = in[clt*3+1];
-		out[clt*3+2] = in[clt*3+2];
-		return;
-	}
-
 	// calculate target N, S, W, E linear index
 	const int nlt = wt*(yt+1)+xt;
 	const int slt = wt*(yt-1)+xt;
 	const int wlt = wt*yt+(xt-1);
 	const int elt = wt*yt+(xt+1);
 
+	// total pixels
+	int npx = 4;
 	// constant neighbor pixel
 	float varPx0 = 0.0f, varPx1 = 0.0f, varPx2 = 0.0f;
 	// accumulate the background pixels
-	if (mask[nlt] > 127.0f) {
-		varPx0 += in[nlt*3+0];
-		varPx1 += in[nlt*3+1];
-		varPx2 += in[nlt*3+2];
+	if (yt < ht-1) {
+		if (mask[nlt] > 127.0f) {
+			varPx0 += in[nlt*3+0];
+			varPx1 += in[nlt*3+1];
+			varPx2 += in[nlt*3+2];
+		}
+	} else {
+		npx--;
 	}
-	if (mask[slt] > 127.0f) {
-		varPx0 += in[slt*3+0];
-		varPx1 += in[slt*3+1];
-		varPx2 += in[slt*3+2];
+	if (yt > 1) {
+		if (mask[slt] > 127.0f) {
+			varPx0 += in[slt*3+0];
+			varPx1 += in[slt*3+1];
+			varPx2 += in[slt*3+2];
+		}
+	} else {
+		npx--;
 	}
-	if (mask[wlt] > 127.0f) {
-		varPx0 += in[wlt*3+0];
-		varPx1 += in[wlt*3+1];
-		varPx2 += in[wlt*3+2];
+	if (xt > 1) {
+		if (mask[wlt] > 127.0f) {
+			varPx0 += in[wlt*3+0];
+			varPx1 += in[wlt*3+1];
+			varPx2 += in[wlt*3+2];
+		}
+	} else {
+		npx--;
 	}
-	if (mask[elt] > 127.0f) {
-		varPx0 += in[elt*3+0];
-		varPx1 += in[elt*3+1];
-		varPx2 += in[elt*3+2];
+	if (xt < wt-1) {
+		if (mask[elt] > 127.0f) {
+			varPx0 += in[elt*3+0];
+			varPx1 += in[elt*3+1];
+			varPx2 += in[elt*3+2];
+		}
+	} else {
+		npx--;
 	}
+	assert(npx > 0);
 
 	// fill the result
-	out[clt*3+0] = fixed[clt*3+0] + varPx0/4;
-	out[clt*3+1] = fixed[clt*3+1] + varPx1/4;
-	out[clt*3+2] = fixed[clt*3+2] + varPx2/4;
+	out[clt*3+0] = fixed[clt*3+0] + varPx0/npx;
+	out[clt*3+1] = fixed[clt*3+1] + varPx1/npx;
+	out[clt*3+2] = fixed[clt*3+2] + varPx2/npx;
 }
 
 void PoissonImageCloning(
@@ -185,7 +217,7 @@ void PoissonImageCloning(
 	cudaMemcpy(buf1, target, sizeof(float)*3*wt*ht, cudaMemcpyDeviceToDevice);
 
 	// iterate
-	for (int i = 0; i < 100; i++) {
+	for (int i = 0; i < 10000; i++) {
 		PoissonImageCloningIteration<<<gdim, bdim>>>(
 			fixed, mask, buf1, buf2, wt, ht
 		);
