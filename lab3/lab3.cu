@@ -74,6 +74,9 @@ __global__ void CalculateFixed(
 			conPx2 += background[nlb*3+2];
 		}
 	} else {
+		conPx0 += background[nlb*3+0];
+		conPx1 += background[nlb*3+1];
+		conPx2 += background[nlb*3+2];
 		npx--;
 	}
 	if (yt > 0) {
@@ -87,6 +90,9 @@ __global__ void CalculateFixed(
 			conPx2 += background[slb*3+2];
 		}
 	} else {
+		conPx0 += background[slb*3+0];
+		conPx1 += background[slb*3+1];
+		conPx2 += background[slb*3+2];
 		npx--;
 	}
 	if (xt > 0) {
@@ -100,6 +106,9 @@ __global__ void CalculateFixed(
 			conPx2 += background[wlb*3+2];
 		}
 	} else {
+		conPx0 += background[wlb*3+0];
+		conPx1 += background[wlb*3+1];
+		conPx2 += background[wlb*3+2];
 		npx--;
 	}
 	if (xt < wt-1) {
@@ -113,13 +122,16 @@ __global__ void CalculateFixed(
 			conPx2 += background[elb*3+2];
 		}
 	} else {
+		conPx0 += background[elb*3+0];
+		conPx1 += background[elb*3+1];
+		conPx2 += background[elb*3+2];
 		npx--;
 	}
 
 	// fill the constant value
-	fixed[clt*3+0] = (npx*target[clt*3+0] - surPx0 + conPx0)/npx;
-	fixed[clt*3+1] = (npx*target[clt*3+1] - surPx1 + conPx1)/npx;
-	fixed[clt*3+2] = (npx*target[clt*3+2] - surPx2 + conPx2)/npx;
+	fixed[clt*3+0] = target[clt*3+0] - surPx0/npx + conPx0/4;
+	fixed[clt*3+1] = target[clt*3+1] - surPx1/npx + conPx1/4;
+	fixed[clt*3+2] = target[clt*3+2] - surPx2/npx + conPx2/4;
 }
 
 __global__ void PoissonImageCloningIteration(
@@ -188,9 +200,9 @@ __global__ void PoissonImageCloningIteration(
 	assert(npx > 0);
 
 	// fill the result
-	out[clt*3+0] = fixed[clt*3+0] + varPx0/npx;
-	out[clt*3+1] = fixed[clt*3+1] + varPx1/npx;
-	out[clt*3+2] = fixed[clt*3+2] + varPx2/npx;
+	out[clt*3+0] = fixed[clt*3+0] + varPx0/4;
+	out[clt*3+1] = fixed[clt*3+1] + varPx1/4;
+	out[clt*3+2] = fixed[clt*3+2] + varPx2/4;
 }
 
 void PoissonImageCloning(
@@ -217,7 +229,7 @@ void PoissonImageCloning(
 	cudaMemcpy(buf1, target, sizeof(float)*3*wt*ht, cudaMemcpyDeviceToDevice);
 
 	// iterate
-	for (int i = 0; i < 1000; i++) {
+	for (int i = 0; i < 10000; i++) {
 		PoissonImageCloningIteration<<<gdim, bdim>>>(
 			fixed, mask, buf1, buf2, wt, ht
 		);
