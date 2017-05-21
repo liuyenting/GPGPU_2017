@@ -1,0 +1,37 @@
+\documentclass[12pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\lhead{Liu, Yen-Ting}
+\chead{GPGPU}
+\rhead{B03902036}
+
+
+\begin{document}
+
+\begin{itemize}
+\item 
+I've tried to implement the SOR, but stuff doesn't go well, and I can only submit the CU file that can properly run. If you'd like to review the code, they are blocked by a return statement in the iteration kernel.
+
+The basic idea is simple, 
+\begin{equation*}
+	C^\prime = \omega C + (1-\omega) C_0
+\end{equation*}
+where $C_0$ is the background pixel, while $\omega$ is limited by the iteration linearly
+\begin{equation*}
+	\omega = 0.99 + 0.02 (1-\frac{\text{iteration}}{\text{iteration}_{MAX}})
+\end{equation*}
+by linearly, means that $\omega$ decreases by the iteration counts, and it will swing pass 1, which is the original formula, and continue to the constraint regime.
+However, it seems that it can still over compensate.
+I believe $\omega$ can be fine tuned by the RMS value, but I have run out of time.
+
+\item
+I've used Thrust to implement a RMS error calculator. The result shows that 20k cycles stops at RMS differences $5 \times 10{-5}$, hence I've limited the cycle by dual constraint: maximum cycles or the RMS differences fall below a certain value -- which can minutely limit the iterations required. 
+\end{itemize}
+
+\end{document}
+              
