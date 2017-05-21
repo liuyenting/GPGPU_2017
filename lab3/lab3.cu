@@ -27,6 +27,15 @@ __global__ void SimpleClone(
 	}
 }
 
+__device__
+int linearIndex(
+	const int x,
+	const int y,
+	const int w
+) {
+	return w*y+x;
+}
+
 __global__ void PoissonClone(
 	const float *background,
 	const float *target,
@@ -37,7 +46,49 @@ __global__ void PoissonClone(
 ) {
 	const int yt = blockIdx.y * blockDim.y + threadIdx.y;
 	const int xt = blockIdx.x * blockDim.x + threadIdx.x;
-	const int curt = wt*yt+xt;
+	const int ct = wt*yt+xt;
+
+	// ignore out-of-range coordinates, 1px spacing
+	if (yt < 1 or yt >= ht-1 or xt < 1 or xt >= wt-1) {
+		return;
+	}
+
+	const int yb = oy+yt, xb = ox+xt;
+	const int cb = wb*yb+xb;
+
+	// calculate target N, S, W, E linear index
+	const int nt = wt*(yt+1)+xt;
+	const int st = wt*(yt-1)+xt;
+	const int wt = wt*yt+(xt-1);
+	const int et = wt*yt+(xt+1);
+	// calculate background N, S, W, E linear index
+	const int nb = wb*(yb+1)+xb;
+	const int sb = wb*(yb-1)+xb;
+	const int wb = wb*yb+(xb+1);
+	const int eb = wb*yb+(xb-1);
+
+	// surrounding pixel sum
+	const float surPx0 = target[nt*3+0] + target[st*3+0] + target[wt*3+0] + target[t*3+0];
+	const float surPx1 = target[nt*3+1] + target[st*3+1] + target[wt*3+1] + target[t*3+1];
+	const float surPx2 = target[nt*3+2] + target[st*3+2] + target[wt*3+2] + target[t*3+2];
+
+	// constant neighbor pixel
+	const float conPx0 = 0.0f, conPx1 = 0.0f, conPx2 = 0.0f;
+	// variate neighbor pixel
+	const float varPx0 = 0.0f, varPx1 = 0.0f, varPx2 = 0.0f;
+	// accumulate the pixels
+	if (mask[nt] > 127.0f) {
+		varPx0 += output[nt*3+0];
+		varPx1 += output[nt*3+1];
+		varPx2 += output[nt*3+2];
+	} else {
+		conPx0 += background[nt*3+0];
+		conPx0 += background[nt*3+1];
+		conPx0 += background[nt*3+2];
+	}
+
+
+
 	if (yt < ht and xt < wt and mask[curt] > 127.0f) {
 		const int yb = oy+yt, xb = ox+xt;
 		const int curb = wb*yb+xb;
@@ -58,6 +109,9 @@ void PoissonImageCloning(
 	const int oy, const int ox
 )
 {
+	
+
+
 	cudaMemcpy(output, background, wb*hb*sizeof(float)*3, cudaMemcpyDeviceToDevice);
 	SimpleClone<<<dim3(CeilDiv(wt,32), CeilDiv(ht,16)), dim3(32,16)>>>(
 		background, target, mask, output,
