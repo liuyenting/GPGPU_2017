@@ -3,6 +3,13 @@
 #include <cassert>
 #include <utility>
 
+#include <thrust/device_vector.h>
+#include <thrust/execution_policy.h>
+#include <thrust/transform.h>
+#include <thrust/reduce.h>
+#include <thrust/functional.h>
+#include <cmath>
+
 __device__ __host__ int CeilDiv(int a, int b) { return (a-1)/b + 1; }
 __device__ __host__ int CeilAlign(int a, int b) { return CeilDiv(a, b) * b; }
 
@@ -113,11 +120,14 @@ __global__ void CalculateFixed(
 }
 
 __global__ void PoissonImageCloningIteration(
+	const float *background,
 	const float *fixed,
 	const float *mask,
 	const float *in,
 	float *out,
-	const int wt, const int ht
+	const int wb, const int hb, const int wt, const int ht,
+	const int oy, const int ox,
+	int iter
 ) {
 	const int yt = blockIdx.y * blockDim.y + threadIdx.y;
 	const int xt = blockIdx.x * blockDim.x + threadIdx.x;
@@ -181,6 +191,17 @@ __global__ void PoissonImageCloningIteration(
 	out[clt*3+0] = fixed[clt*3+0] + varPx0/4;
 	out[clt*3+1] = fixed[clt*3+1] + varPx1/4;
 	out[clt*3+2] = fixed[clt*3+2] + varPx2/4;
+
+	return;
+
+	// sor
+	if (iter > 500) {
+		iter = 500;
+	}
+	float omega = 0.99f + 0.02f*(1-iter/500.0f);
+	out[clt*3+0] = omega*out[clt*3+0] + (1.0f-omega)*background[clt*3+0];
+	out[clt*3+1] = omega*out[clt*3+1] + (1.0f-omega)*background[clt*3+1];
+	out[clt*3+2] = omega*out[clt*3+2] + (1.0f-omega)*background[clt*3+2];
 }
 
 __global__ void SimpleClone(
@@ -206,6 +227,13 @@ __global__ void SimpleClone(
 	}
 }
 
+struct rms_functor {
+	__host__ __device__
+	float operator()(const float& x, const float& y) const {
+		return (x-y)*(x-y);
+	}
+};
+
 void PoissonImageCloning(
 	const float *background,
 	const float *target,
@@ -215,11 +243,14 @@ void PoissonImageCloning(
 	const int oy, const int ox
 )
 {
+	const size_t N = 3*wt*ht;
 	// setup
 	float *fixed, *buf1, *buf2;
-	cudaMalloc(&fixed, 3*wt*ht*sizeof(float));
-	cudaMalloc(&buf1, 3*wt*ht*sizeof(float));
-	cudaMalloc(&buf2, 3*wt*ht*sizeof(float));
+	cudaMalloc(&fixed, N*sizeof(float));
+	cudaMalloc(&buf1, N*sizeof(float));
+	cudaMalloc(&buf2, N*sizeof(float));
+
+	thrust::device_vector<float> tmp(N);
 
 	// initialize the iteration
 	dim3 gdim(CeilDiv(wt, 32), CeilDiv(ht, 16)), bdim(32, 16);
@@ -230,12 +261,38 @@ void PoissonImageCloning(
 	cudaMemcpy(buf1, target, sizeof(float)*3*wt*ht, cudaMemcpyDeviceToDevice);
 
 	// iterate
-	for (int i = 0; i < 20000; i++) {
+	float oldRms = -1.0f, newRms = -1.0f, rmsDiff = 1.0f;
+	int i;
+	for (i = 0; i < 20000 and rmsDiff > 0.00006f; i++) {
 		PoissonImageCloningIteration<<<gdim, bdim>>>(
-			fixed, mask, buf1, buf2, wt, ht
+			background, fixed, mask,
+			buf1, buf2,
+			wb, hb, wt, ht, oy, ox,
+			i
 		);
+
+		thrust::transform(
+			thrust::device,
+			buf1, buf1+N,
+			buf2,
+			tmp.begin(),
+			rms_functor()
+		);
+		newRms = thrust::reduce(
+			tmp.begin(), tmp.end(),
+			0.0f,
+			thrust::plus<float>()
+		);
+		newRms = sqrt(newRms);
+		if (oldRms > 0) {
+			rmsDiff = oldRms - newRms;
+		}
+		oldRms = newRms;
+
+		// calculate rmse
 		std::swap(buf1, buf2);
 	}
+	fprintf(stderr, "stop at i = %d\n", i);
 
 	// copy the image back
 	cudaMemcpy(output, background, wb*hb*sizeof(float)*3, cudaMemcpyDeviceToDevice);
