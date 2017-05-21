@@ -117,14 +117,11 @@ __global__ void PoissonImageCloningIteration(
 		return;
 	}
 
-	const int yb = oy+yt, xb = ox+xt;
-	const int clb = wb*yb+xb;
-
 	// 1px spacing, using background values
 	if (yt < 1 or yt >= ht-1 or xt < 1 or xt >= wt-1) {
-		out[clt*3+0] = in[clb*3+0];
-		out[clt*3+1] = in[clb*3+1];
-		out[clt*3+2] = in[clb*3+2];
+		out[clt*3+0] = in[clt*3+0];
+		out[clt*3+1] = in[clt*3+1];
+		out[clt*3+2] = in[clt*3+2];
 		return;
 	}
 
@@ -188,7 +185,7 @@ void PoissonImageCloning(
 	cudaMemcpy(buf1, target, sizeof(float)*3*wt*ht, cudaMemcpyDeviceToDevice);
 
 	// iterate
-	for (int i = 0; i < 1; i++) {
+	for (int i = 0; i < 100; i++) {
 		PoissonImageCloningIteration<<<gdim, bdim>>>(
 			fixed, mask, buf1, buf2, wt, ht
 		);
@@ -200,7 +197,7 @@ void PoissonImageCloning(
 	// copy the image back
 	cudaMemcpy(output, background, wb*hb*sizeof(float)*3, cudaMemcpyDeviceToDevice);
 	SimpleClone<<<dim3(CeilDiv(wt,32), CeilDiv(ht,16)), dim3(32,16)>>>(
-		background, buf2, mask, output,
+		background, buf1, mask, output,
 		wb, hb, wt, ht, oy, ox
 	);
 
