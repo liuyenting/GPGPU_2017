@@ -76,7 +76,7 @@ __global__ void CalculateFixed(
 	} else {
 		npx--;
 	}
-	if (yt > 1) {
+	if (yt > 0) {
 		surPx0 += target[slt*3+0];
 		surPx1 += target[slt*3+1];
 		surPx2 += target[slt*3+2];
@@ -89,7 +89,7 @@ __global__ void CalculateFixed(
 	} else {
 		npx--;
 	}
-	if (xt > 1) {
+	if (xt > 0) {
 		surPx0 += target[wlt*3+0];
 		surPx1 += target[wlt*3+1];
 		surPx2 += target[wlt*3+2];
@@ -158,7 +158,7 @@ __global__ void PoissonImageCloningIteration(
 	} else {
 		npx--;
 	}
-	if (yt > 1) {
+	if (yt > 0) {
 		if (mask[slt] > 127.0f) {
 			varPx0 += in[slt*3+0];
 			varPx1 += in[slt*3+1];
@@ -167,7 +167,7 @@ __global__ void PoissonImageCloningIteration(
 	} else {
 		npx--;
 	}
-	if (xt > 1) {
+	if (xt > 0) {
 		if (mask[wlt] > 127.0f) {
 			varPx0 += in[wlt*3+0];
 			varPx1 += in[wlt*3+1];
@@ -217,7 +217,7 @@ void PoissonImageCloning(
 	cudaMemcpy(buf1, target, sizeof(float)*3*wt*ht, cudaMemcpyDeviceToDevice);
 
 	// iterate
-	for (int i = 0; i < 10000; i++) {
+	for (int i = 0; i < 1000; i++) {
 		PoissonImageCloningIteration<<<gdim, bdim>>>(
 			fixed, mask, buf1, buf2, wt, ht
 		);
