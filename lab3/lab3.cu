@@ -258,11 +258,12 @@ void PoissonImageCloning(
 		background, target, mask, fixed,
 		wb, hb, wt, ht, oy, ox
 	);
-	cudaMemcpy(buf1, target, sizeof(float)*3*wt*ht, cudaMemcpyDeviceToDevice);
+	cudaMemcpy(buf1, target, sizeof(float)*N, cudaMemcpyDeviceToDevice);
 
 	// iterate
 	float oldRms = -1.0f, newRms = -1.0f, rmsDiff = 1.0f;
 	int i;
+	// div 2
 	for (i = 0; i < 20000 and rmsDiff > 0.00006f; i++) {
 		PoissonImageCloningIteration<<<gdim, bdim>>>(
 			background, fixed, mask,
