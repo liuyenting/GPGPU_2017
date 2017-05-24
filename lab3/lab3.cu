@@ -192,16 +192,16 @@ __global__ void PoissonImageCloningIteration(
 	out[clt*3+1] = fixed[clt*3+1] + varPx1/4;
 	out[clt*3+2] = fixed[clt*3+2] + varPx2/4;
 
-	return;
+	//return;
 
 	// sor
-	if (iter > 500) {
-		iter = 500;
+	if (iter > 50) {
+		iter = 50;
 	}
-	float omega = 0.99f + 0.02f*(1-iter/500.0f);
-	out[clt*3+0] = omega*out[clt*3+0] + (1.0f-omega)*background[clt*3+0];
-	out[clt*3+1] = omega*out[clt*3+1] + (1.0f-omega)*background[clt*3+1];
-	out[clt*3+2] = omega*out[clt*3+2] + (1.0f-omega)*background[clt*3+2];
+	float omega = 1.0f + 0.5f*(1-iter/50.0f);
+	out[clt*3+0] = omega*out[clt*3+0] + (1.0f-omega)*in[clt*3+0];
+	out[clt*3+1] = omega*out[clt*3+1] + (1.0f-omega)*in[clt*3+1];
+	out[clt*3+2] = omega*out[clt*3+2] + (1.0f-omega)*in[clt*3+2];
 }
 
 __global__ void SimpleClone(
@@ -264,7 +264,7 @@ void PoissonImageCloning(
 	float oldRms = -1.0f, newRms = -1.0f, rmsDiff = 1.0f;
 	int i;
 	// div 2
-	for (i = 0; i < 20000 and rmsDiff > 0.00006f; i++) {
+	for (i = 0; i < 100; i++) {
 		PoissonImageCloningIteration<<<gdim, bdim>>>(
 			background, fixed, mask,
 			buf1, buf2,
@@ -289,6 +289,8 @@ void PoissonImageCloning(
 			rmsDiff = oldRms - newRms;
 		}
 		oldRms = newRms;
+
+		fprintf(stderr, "rmse = %.f\n", newRms);
 
 		// calculate rmse
 		std::swap(buf1, buf2);
